@@ -46,3 +46,18 @@ func registerActivityOnce(w worker.Worker, fn any, name string) {
 
 	w.RegisterActivityWithOptions(fn, activity.RegisterOptions{Name: name})
 }
+
+// ForgetWorkerActivities removes registrations for a worker that has stopped
+// or failed to start. The keys otherwise retain the worker after a watch reload.
+func ForgetWorkerActivities(w worker.Worker) {
+	if w == nil {
+		return
+	}
+
+	activityRegistry.Range(func(key, _ any) bool {
+		if key.(activityRegistryKey).worker == w {
+			activityRegistry.Delete(key)
+		}
+		return true
+	})
+}

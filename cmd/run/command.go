@@ -144,9 +144,7 @@ func runRunCmd(ctx context.Context, opts *runOptions) error {
 	if opts.Watch {
 		watchFiles, err := discoverWorkflowFiles(opts)
 		if err != nil {
-			for _, w := range startedWorkers {
-				w.Stop()
-			}
+			stopWorkers(startedWorkers)
 			return err
 		}
 
@@ -166,9 +164,7 @@ func runRunCmd(ctx context.Context, opts *runOptions) error {
 	// Temporal client is closed. Telemetry.Shutdown is nil-safe.
 	defer func() {
 		log.Info().Int("count", len(startedWorkers)).Msg("Stopping workers")
-		for _, w := range startedWorkers {
-			w.Stop()
-		}
+		stopWorkers(startedWorkers)
 		if opts.Telemetry != nil {
 			opts.Telemetry.Shutdown()
 		}

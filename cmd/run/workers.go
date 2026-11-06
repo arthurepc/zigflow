@@ -98,9 +98,8 @@ func startAllWorkers(workers map[string]worker.Worker) ([]worker.Worker, error) 
 		w := workers[taskQueue]
 		log.Info().Str("task-queue", taskQueue).Msg("Starting worker")
 		if err := w.Start(); err != nil {
-			for _, sw := range started {
-				sw.Stop()
-			}
+			stopWorkers(started)
+			forgetWorkerRegistrations(workers)
 			return nil, gh.FatalError{
 				Cause: err,
 				WithParams: func(l *zerolog.Event) *zerolog.Event {
@@ -122,7 +121,7 @@ func buildWorkersByTaskQueue(
 	registrations []*workflowRegistration,
 	envvars map[string]any,
 	opts *runOptions,
-) (map[string]worker.Worker, error) {
+) (_ map[string]worker.Worker, buildErr error) {
 	if opts.MaxConcurrentWorkflowTaskExecutionSize == 1 {
 		return nil, gh.FatalError{
 			Msg: "Max concurrent workflow task execution size cannot be set to 1",
@@ -130,6 +129,11 @@ func buildWorkersByTaskQueue(
 	}
 
 	workers := make(map[string]worker.Worker)
+	defer func() {
+		if buildErr != nil {
+			forgetWorkerRegistrations(workers)
+		}
+	}()
 
 	for _, reg := range registrations {
 		w, ok := workers[reg.TaskQueue]
@@ -240,12 +244,25 @@ func launchWorkers(
 	return startAllWorkers(workers)
 }
 
-// stopWorkerList stops each worker in the slice.
-func stopWorkerList(workers []worker.Worker) {
-	log.Info().Int("count", len(workers)).Msg("Watch: stopping workers")
+// forgetWorkerRegistrations releases registrations for workers that never started.
+func forgetWorkerRegistrations(workers map[string]worker.Worker) {
+	for _, w := range workers {
+		tasks.ForgetWorkerActivities(w)
+	}
+}
+
+// stopWorkers stops each worker and releases its activity registrations.
+func stopWorkers(workers []worker.Worker) {
 	for _, w := range workers {
 		w.Stop()
+		tasks.ForgetWorkerActivities(w)
 	}
+}
+
+// stopWorkerList stops workers during watch mode.
+func stopWorkerList(workers []worker.Worker) {
+	log.Info().Int("count", len(workers)).Msg("Watch: stopping workers")
+	stopWorkers(workers)
 }
 
 // initTemporalClient creates the codec data converter and the Temporal client.
@@ -327,6 +344,7 @@ func startInitialWorkers(
 		taskQueues = append(taskQueues, tq)
 	}
 	if err := temporal.NewHealthCheck(ctx, taskQueues, opts.temporal.HealthListenAddress, tc); err != nil {
+		forgetWorkerRegistrations(workers)
 		return nil, fmt.Errorf("error creating healthcheck: %w", err)
 	}
 
